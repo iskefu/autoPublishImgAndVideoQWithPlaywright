@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import random
+import re
 from playwright.async_api import Playwright, async_playwright, expect
 from dotenv import load_dotenv
 load_dotenv()
@@ -44,82 +45,71 @@ def get_cover(folder_path):
 
 async def xhs(browser):
     
-    cookies = os.getenv('COOKIES_XHS')
+    cookies = os.getenv('COOKIES_WB')
     if os.path.exists(cookies):
         await load_cookies(cookies, browser)
         
     page=await browser.new_page()
 
-    url='https://www.xiaohongshu.com/'
+    url='https://weibo.com'
     await page.goto(url)
     await page.wait_for_load_state('load')
     
-    login_element='div.side-bar div.reds-img-box'
-    is_login=await page.is_visible(login_element)
-    if not is_login:
-        print('未登录, 开始登录')
-        try:
-            await page.wait_for_selector(login_element)
-        except Exception as e:
-            print(e)
-            print('登录失败')
-            return
-    
-    print('登录成功')
-    await save_cookies(cookies, page)
-    
-    # 发布
-    async with page.expect_popup() as popup_info:
-        await page.get_by_role("link", name="发布",exact=True).click()
-    page1 = await popup_info.value
-    await page1.wait_for_load_state('load')
-    
-    login_element2='img.css-wemwzq'
-    is_login2=await page1.is_visible(login_element2)
-    # print(is_login2)
+    is_login2=await page.locator('#__sidebar button').is_visible()
+    print("""是否登录创作服务平台:""",is_login2)
     if is_login2:
         print('未登录创作服务平台, 开始登录')
         try:
-            await page1.locator('img.css-wemwzq').click()
-            await page1.wait_for_selector('a.btn')
+            await page.locator('#__sidebar button').click()
+            await page.get_by_role("button", name="发微博").wait_for()
         except Exception as e:
             print(e)
             return
         
-    await page1.wait_for_load_state('load')
+    await page.wait_for_load_state('load')
     print('登录创作服务平台成功')
-    await save_cookies(cookies, page1)
+    await save_cookies(cookies, page)
+    await page.wait_for_load_state('load')
     
-    await page1.locator('a.btn').click()
-    await page1.locator('div.tab').last.click()
+    await page.get_by_role("button", name="发微博").click()
+    async with page.expect_popup() as p1_info:
+        await page.locator("div").filter(has_text=re.compile(r"^视频$")).nth(3).click()
+    page1 = await p1_info.value
+    await page1.wait_for_load_state('load')
     
+    # 选择视频
+    print("视频地址:",video)
+    page1.once("filechooser", lambda file_chooser: file_chooser.set_files(video))
+    # await page1.locator('section.video-wrap input').set_input_files(video)
+    await page1.get_by_role("button", name="上传视频").click()
+    await page1.get_by_text("上传完成").first.wait_for()
+    print('上传视频成功')
     
-    # 获取文件夹下所有图片
-    def get_all_cover(path):
-     return [
-        os.path.join(path, f)
-        for f in os.listdir(path)
-        if f.lower().endswith(('.png', '.jpg', '.jpeg', '.webp'))
-    ]
-    covers = get_all_cover(cover)
-    await page1.locator('div.drag-over input').set_input_files(covers)
-    print('上传图片成功')
-    
-    title= os.path.basename(cover)
-    await page1.locator('input.el-input__inner').first.fill(title)
+    title= os.getenv('TITLE')
+    title=title.replace(',', ' ')
+    title=title.replace('，', ' ')
+    await page1.get_by_placeholder("填写标题（0～30个字）").fill(title)
     print('填写标题成功')
+    
+    # 原创
+    await page1.locator("label").filter(has_text="原创").locator("span").first.click()
+    print('选择原创成功')
+    # tags
+    tags=os.getenv('TAGS')
+    # await page1.locator('div.input-instance input').nth(1).fill(tags)
+    # page1.keyboard.press("Enter")
+    # print('填写标签成功')
     
     # 描述
     description=os.getenv('DESCRIPTION')
-    await page1.locator('#post-textarea').fill(description+title)
+    await page1.get_by_placeholder("有什么新鲜事想分享给大家？").fill(description+title+tags)
     print('填写描述成功')
     
     # 发布
-    await page1.wait_for_timeout(10000)
     await page1.get_by_role("button", name="发布").click()
     print('发布成功')
         
-    await page.pause()
+    await page1.pause()
 
 async def main():
     
@@ -128,5 +118,5 @@ async def main():
         await xhs(browser)
 
 if __name__ == '__main__':
-    cover=os.getenv('COVER_PATH')
+    video=os.getenv('VIDEO_PATH')
     asyncio.run(main())
